@@ -8,44 +8,24 @@ import (
 	"gorm.io/gorm"
 )
 
-var db *gorm.DB
-
 type Book struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Author string `json:"author"`
 }
 
-func main() {
-	var err error
-	db, err = gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
-
-	if err != nil {
-		panic("failed to connect database")
-	}
-
-	db.AutoMigrate(&Book{})
-
-	r := gin.New()
-
-	r.GET("/", rootHandler)
-	r.GET("/books", listBooksHandler)
-	r.POST("/books", createBookHandler)
-	r.DELETE("/books/:id", deleteBookHandler)
-
-	r.Run()
+type Handler struct {
+	db *gorm.DB
 }
 
-func rootHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Hello World!",
-	})
+func newHandler(db *gorm.DB) *Handler {
+	return &Handler{db}
 }
 
-func listBooksHandler(c *gin.Context) {
+func (h *Handler) listBooksHandler(c *gin.Context) {
 	var books []Book
 
-	if result := db.Find(&books); result.Error != nil {
+	if result := h.db.Find(&books); result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": result.Error.Error(),
 		})
@@ -55,7 +35,20 @@ func listBooksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, &books)
 }
 
-func createBookHandler(c *gin.Context) {
+func (h *Handler) deleteBookHandler(c *gin.Context) {
+	id := c.Param("id")
+
+	if result := h.db.Delete(&Book{}, id); result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": result.Error.Error(),
+		})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) createBookHandlers(c *gin.Context) {
 	var book Book
 
 	if err := c.ShouldBindJSON(&book); err != nil {
@@ -65,7 +58,7 @@ func createBookHandler(c *gin.Context) {
 		return
 	}
 
-	if result := db.Create(&book); result.Error != nil {
+	if result := h.db.Create(&book); result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": result.Error.Error(),
 		})
@@ -75,15 +68,28 @@ func createBookHandler(c *gin.Context) {
 	c.JSON(http.StatusCreated, &book)
 }
 
-func deleteBookHandler(c *gin.Context) {
-	id := c.Param("id")
+func (h *Handler) rootHandlers(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Hello World!",
+	})
+}
+func main() {
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
 
-	if result := db.Delete(&Book{}, id); result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": result.Error.Error(),
-		})
-		return
+	if err != nil {
+		panic("failed to connect database")
 	}
 
-	c.Status(http.StatusNoContent)
+	db.AutoMigrate(&Book{})
+
+	handler := newHandler(db)
+
+	r := gin.New()
+
+	r.GET("/", handler.rootHandlers)
+	r.GET("/books", handler.listBooksHandler)
+	r.POST("/books", handler.createBookHandlers)
+	r.DELETE("/books/:id", handler.deleteBookHandler)
+
+	r.Run()
 }
